@@ -2,6 +2,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.List;
 
 public class DataRetriever {
@@ -31,11 +32,31 @@ public class DataRetriever {
             throw new RuntimeException(e);
         }
     }
-    private List<Ingredient> findIngredientByDishId(Integer id) {
-throw new RuntimeException(
-        "TODO : select ingredient.id, ingredient.name, ingredient.price, ingredient.category\n" +
-        "from ingredient\n" +
-        "where id_dish = 1;");
 
+    private List<Ingredient> findIngredientByDishId(Integer idDish) {
+        DBConnection dbConnection = new DBConnection();
+        Connection connection = dbConnection.getConnection();
+        List<Ingredient> ingredients = new ArrayList<>();
+        try {
+            PreparedStatement preparedStatement = connection.prepareStatement(
+                    """
+                            select ingredient.id, ingredient.name, ingredient.price, ingredient.category 
+                            from ingredient where id_dish = ?;
+                            """);
+            preparedStatement.setInt(1, idDish);
+            ResultSet resultSet = preparedStatement.executeQuery();
+            while (resultSet.next()) {
+                Ingredient ingredient = new Ingredient();
+                ingredient.setId(resultSet.getInt("id"));
+                ingredient.setName(resultSet.getString("name"));
+                ingredient.setPrice(resultSet.getDouble("price"));
+                ingredient.setCategory(CategoryEnum.valueOf(resultSet.getString("category")));
+                ingredients.add(ingredient);
+            }
+            dbConnection.closeConnection(connection);
+            return ingredients;
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
     }
 }
