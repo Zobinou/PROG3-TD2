@@ -1,3 +1,5 @@
+import jdk.jshell.Snippet;
+
 import java.util.Objects;
 
 public class Ingredient {
@@ -7,6 +9,11 @@ public class Ingredient {
     private Double price;
     private Dish dish;
     private Double quantity;
+
+    public static Snippet builder() {
+        return null;
+    }
+
 
     public Double getQuantity() {
         return quantity;

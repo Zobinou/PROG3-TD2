@@ -1,3 +1,5 @@
+import jdk.jshell.Snippet;
+
 import java.util.List;
 import java.util.Objects;
 
@@ -7,6 +9,12 @@ public class Dish {
     private String name;
     private DishTypeEnum dishType;
     private List<Ingredient> ingredients;
+    private Double sellingPrice;
+
+    public static Snippet builder() {
+        return null;
+    }
+
 
     public Double getPrice() {
         return price;
@@ -106,5 +114,9 @@ public class Dish {
             throw new RuntimeException("Price is null");
         }
         return price - getDishCost();
+    }
+
+    public List<DishIngredient> getDishIngredients() {
+                return null;
     }
 }
