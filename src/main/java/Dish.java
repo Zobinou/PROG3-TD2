@@ -1,51 +1,21 @@
-import jdk.jshell.Snippet;
-
 import java.util.List;
 import java.util.Objects;
 
 public class Dish {
     private Integer id;
-    private Double price;
+    private Double price; // prix de vente
     private String name;
     private DishTypeEnum dishType;
-    private List<Ingredient> ingredients;
-    private Double sellingPrice;
-
-    public static Snippet builder() {
-        return null;
-    }
-
-
-    public Double getPrice() {
-        return price;
-    }
-
-    public void setPrice(Double price) {
-        this.price = price;
-    }
-
-    public Double getDishCost() {
-        double totalPrice = 0;
-        for (int i = 0; i < ingredients.size(); i++) {
-            Double quantity = ingredients.get(i).getQuantity();
-            if(quantity == null) {
-                throw new RuntimeException("...");
-            }
-            totalPrice = totalPrice + ingredients.get(i).getPrice() * quantity;
-        }
-        return totalPrice;
-    }
+    private List<DishIngredient> dishIngredients;
 
     public Dish() {
     }
 
-    public Dish(Integer id, String name, DishTypeEnum dishType, List<Ingredient> ingredients) {
+    public Dish(Integer id, String name, DishTypeEnum dishType) {
         this.id = id;
         this.name = name;
         this.dishType = dishType;
-        this.ingredients = ingredients;
     }
-
 
     public Integer getId() {
         return id;
@@ -53,6 +23,14 @@ public class Dish {
 
     public void setId(Integer id) {
         this.id = id;
+    }
+
+    public Double getPrice() {
+        return price;
+    }
+
+    public void setPrice(Double price) {
+        this.price = price;
     }
 
     public String getName() {
@@ -71,31 +49,67 @@ public class Dish {
         this.dishType = dishType;
     }
 
-    public List<Ingredient> getIngredients() {
-        return ingredients;
+    public List<DishIngredient> getDishIngredients() {
+        return dishIngredients;
     }
 
-    public void setIngredients(List<Ingredient> ingredients) {
-        if (ingredients == null) {
-            this.ingredients = null;
-            return;
+    public void setDishIngredients(List<DishIngredient> dishIngredients) {
+        this.dishIngredients = dishIngredients;
+    }
+
+    /**
+     * Calcule le coût total du plat en fonction des ingrédients et quantités requises
+     */
+    public Double getDishCost() {
+        if (dishIngredients == null || dishIngredients.isEmpty()) {
+            return 0.0;
         }
-        for (int i = 0; i < ingredients.size(); i++) {
-            ingredients.get(i).setDish(this);
+
+        double totalCost = 0.0;
+        for (DishIngredient dishIngredient : dishIngredients) {
+            // Vérifications avec gestion correcte des null
+            if (dishIngredient.getIngredient() == null) {
+                throw new RuntimeException("Ingrédient null");
+            }
+
+            Double ingredientPrice = dishIngredient.getIngredient().getPrice();
+            if (ingredientPrice == null) {
+                throw new RuntimeException("Prix de l'ingrédient null");
+            }
+
+            Double quantity = dishIngredient.getQuantity();
+            if (quantity == null) {
+                throw new RuntimeException("Quantité requise null");
+            }
+
+            totalCost += ingredientPrice * quantity;
         }
-        this.ingredients = ingredients;
+
+        return totalCost;
+    }
+
+    /**
+     * Calcule la marge brute : prix de vente - coût des ingrédients
+     */
+    public Double getGrossMargin() {
+        if (price == null) {
+            throw new IllegalStateException("Le prix de vente n'est pas défini pour ce plat");
+        }
+        return price - getDishCost();
     }
 
     @Override
     public boolean equals(Object o) {
         if (o == null || getClass() != o.getClass()) return false;
         Dish dish = (Dish) o;
-        return Objects.equals(id, dish.id) && Objects.equals(name, dish.name) && dishType == dish.dishType && Objects.equals(ingredients, dish.ingredients);
+        return Objects.equals(id, dish.id) &&
+                Objects.equals(name, dish.name) &&
+                dishType == dish.dishType;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id, name, dishType, ingredients);
+        return Objects.hash(id, name, dishType);
     }
 
     @Override
@@ -105,18 +119,7 @@ public class Dish {
                 ", price=" + price +
                 ", name='" + name + '\'' +
                 ", dishType=" + dishType +
-                ", ingredients=" + ingredients +
+                ", dishIngredients=" + dishIngredients +
                 '}';
-    }
-
-    public Double getGrossMargin() {
-        if (price == null) {
-            throw new RuntimeException("Price is null");
-        }
-        return price - getDishCost();
-    }
-
-    public List<DishIngredient> getDishIngredients() {
-                return null;
     }
 }
