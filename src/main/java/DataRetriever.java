@@ -5,9 +5,9 @@ import java.util.List;
 
 public class DataRetriever {
 
-    // ========== MÉTHODES TD3 (Dish et DishIngredient) ==========
+    //  MÉTHODES Dish et DishIngredient
 
-    Dish findDishById(Integer id) {
+    public Dish findDishById(Integer id) {
         DBConnection dbConnection = new DBConnection();
         Connection connection = dbConnection.getConnection();
         try {
@@ -100,11 +100,8 @@ public class DataRetriever {
         return dish.getGrossMargin();
     }
 
-    // ========== MÉTHODES TD4 (Stock et Ingredient) ==========
+    // MÉTHODES Stock et Ingredient
 
-    /**
-     * TD4 - Question 2a: Sauvegarde un ingrédient avec ses mouvements de stock
-     */
     public Ingredient saveIngredient(Ingredient toSave) {
         String upsertIngredientSql = """
                 INSERT INTO ingredient (id, name, category, price)
@@ -136,7 +133,6 @@ public class DataRetriever {
                 }
             }
 
-            // Sauvegarder les mouvements de stock
             if (toSave.getStockMovementList() != null && !toSave.getStockMovementList().isEmpty()) {
                 saveStockMovements(conn, ingredientId, toSave.getStockMovementList());
             }
@@ -148,9 +144,6 @@ public class DataRetriever {
         }
     }
 
-    /**
-     * Récupère un ingrédient par son ID avec ses mouvements de stock
-     */
     public Ingredient findIngredientById(Integer id) {
         DBConnection dbConnection = new DBConnection();
         Connection connection = dbConnection.getConnection();
@@ -171,8 +164,6 @@ public class DataRetriever {
                 ingredient.setName(rs.getString("name"));
                 ingredient.setCategory(CategoryEnum.valueOf(rs.getString("category")));
                 ingredient.setPrice(rs.getDouble("price"));
-
-                // Charger les mouvements de stock
                 ingredient.setStockMovementList(findStockMovementsByIngredientId(id));
 
                 dbConnection.closeConnection(connection);
@@ -187,10 +178,6 @@ public class DataRetriever {
         }
     }
 
-    /**
-     * Sauvegarde les mouvements de stock d'un ingrédient
-     * Règle: ON CONFLICT DO NOTHING si l'id existe déjà
-     */
     private void saveStockMovements(Connection conn, Integer ingredientId,
                                     List<StockMovement> movements) throws SQLException {
         String insertSql = """
@@ -216,9 +203,6 @@ public class DataRetriever {
         }
     }
 
-    /**
-     * Récupère tous les mouvements de stock d'un ingrédient
-     */
     private List<StockMovement> findStockMovementsByIngredientId(Integer ingredientId) {
         DBConnection dbConnection = new DBConnection();
         Connection connection = dbConnection.getConnection();
@@ -241,7 +225,6 @@ public class DataRetriever {
                 movement.setQuantity(rs.getDouble("quantity"));
                 movement.setUnit(StockMovement.UnitType.valueOf(rs.getString("unit")));
                 movement.setMovementDate(rs.getTimestamp("movement_date").toInstant());
-
                 movements.add(movement);
             }
 
@@ -253,15 +236,11 @@ public class DataRetriever {
         }
     }
 
-    /**
-     * TD4 - Question 3: Calcule le niveau de stock d'un ingrédient à une date donnée
-     */
     public Stock getStockValueAt(Integer ingredientId, Instant t) {
         DBConnection dbConnection = new DBConnection();
         Connection connection = dbConnection.getConnection();
 
         try {
-            // Récupérer le stock initial
             PreparedStatement psStock = connection.prepareStatement(
                     """
                     SELECT quantity, unit
@@ -278,7 +257,6 @@ public class DataRetriever {
             double initialQuantity = rsStock.getDouble("quantity");
             String unit = rsStock.getString("unit");
 
-            // Calculer la somme des mouvements jusqu'à la date t
             PreparedStatement psMovements = connection.prepareStatement(
                     """
                     SELECT COALESCE(SUM(quantity), 0) as total_movements
@@ -294,7 +272,6 @@ public class DataRetriever {
                 totalMovements = rsMovements.getDouble("total_movements");
             }
 
-            // Créer l'objet Stock avec la quantité finale
             Ingredient ingredient = findIngredientById(ingredientId);
             Stock stock = new Stock();
             stock.setIngredient(ingredient);
@@ -309,7 +286,210 @@ public class DataRetriever {
         }
     }
 
-    // ========== MÉTHODES UTILITAIRES ==========
+    // MÉTHODES POUR LES COMMANDES Orders
+
+
+    public Order saveOrder(Order orderToSave) throws InsufficientStockException {
+        try (Connection conn = new DBConnection().getConnection()) {
+            conn.setAutoCommit(false);
+
+            // 1. Vérifier le stock pour chaque plat de la commande
+            checkStockAvailability(conn, orderToSave);
+
+            // 2. Insérer la commande
+            String insertOrderSql = """
+                    INSERT INTO "order" (id, reference, creation_datetime)
+                    VALUES (?, ?, ?)
+                    RETURNING id
+                    """;
+
+            Integer orderId;
+            try (PreparedStatement ps = conn.prepareStatement(insertOrderSql)) {
+                if (orderToSave.getId() != null) {
+                    ps.setInt(1, orderToSave.getId());
+                } else {
+                    ps.setInt(1, getNextSerialValue(conn, "order", "id"));
+                }
+                ps.setString(2, orderToSave.getReference());
+                ps.setTimestamp(3, Timestamp.from(orderToSave.getCreationDateTime()));
+
+                try (ResultSet rs = ps.executeQuery()) {
+                    rs.next();
+                    orderId = rs.getInt(1);
+                }
+            }
+
+            // 3. Insérer les DishOrder
+            saveDishOrders(conn, orderId, orderToSave.getDishOrders());
+
+            // 4. Mettre à jour les stocks (créer des mouvements négatifs)
+            updateStockForOrder(conn, orderToSave);
+
+            conn.commit();
+            return findOrderByReference(orderToSave.getReference());
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+
+    private void checkStockAvailability(Connection conn, Order order)
+            throws SQLException, InsufficientStockException {
+        for (DishOrder dishOrder : order.getDishOrders()) {
+            Dish dish = dishOrder.getDish();
+            int quantityOrdered = dishOrder.getQuantity();
+
+            // Pour chaque ingrédient du plat
+            List<DishIngredient> ingredients = findIngredientsByDishId(dish.getId());
+            for (DishIngredient di : ingredients) {
+                double requiredQuantity = di.getQuantity() * quantityOrdered;
+
+                // Vérifier le stock actuel
+                double currentStock = getCurrentStock(conn, di.getIngredient().getId());
+
+                if (currentStock < requiredQuantity) {
+                    throw new InsufficientStockException(
+                            "Stock insuffisant pour " + di.getIngredient().getName() +
+                                    ". Requis: " + requiredQuantity + " KG, Disponible: " + currentStock + " KG"
+                    );
+                }
+            }
+        }
+    }
+
+
+    private double getCurrentStock(Connection conn, Integer ingredientId) throws SQLException {
+        String sql = """
+                SELECT s.quantity + COALESCE(SUM(sm.quantity), 0) as current_stock
+                FROM stock s
+                LEFT JOIN stock_movement sm ON s.id_ingredient = sm.id_ingredient
+                WHERE s.id_ingredient = ?
+                GROUP BY s.quantity
+                """;
+
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, ingredientId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getDouble("current_stock");
+                }
+            }
+        }
+        return 0.0;
+    }
+
+
+    private void updateStockForOrder(Connection conn, Order order) throws SQLException {
+        for (DishOrder dishOrder : order.getDishOrders()) {
+            List<DishIngredient> ingredients = findIngredientsByDishId(dishOrder.getDish().getId());
+
+            for (DishIngredient di : ingredients) {
+                double quantityToDeduct = di.getQuantity() * dishOrder.getQuantity();
+
+                // Créer un mouvement de stock négatif
+                String insertMovement = """
+                        INSERT INTO stock_movement (id_ingredient, quantity, unit, movement_date)
+                        VALUES (?, ?, 'KG', ?)
+                        """;
+
+                try (PreparedStatement ps = conn.prepareStatement(insertMovement)) {
+                    ps.setInt(1, di.getIngredient().getId());
+                    ps.setDouble(2, -quantityToDeduct);
+                    ps.setTimestamp(3, Timestamp.from(order.getCreationDateTime()));
+                    ps.executeUpdate();
+                }
+            }
+        }
+    }
+
+
+    private void saveDishOrders(Connection conn, Integer orderId,
+                                List<DishOrder> dishOrders) throws SQLException {
+        String insertSql = """
+                INSERT INTO dish_order (id_order, id_dish, quantity)
+                VALUES (?, ?, ?)
+                """;
+
+        try (PreparedStatement ps = conn.prepareStatement(insertSql)) {
+            for (DishOrder dishOrder : dishOrders) {
+                ps.setInt(1, orderId);
+                ps.setInt(2, dishOrder.getDish().getId());
+                ps.setInt(3, dishOrder.getQuantity());
+                ps.addBatch();
+            }
+            ps.executeBatch();
+        }
+    }
+
+
+    public Order findOrderByReference(String reference) {
+        DBConnection dbConnection = new DBConnection();
+        Connection connection = dbConnection.getConnection();
+
+        try {
+            PreparedStatement ps = connection.prepareStatement(
+                    """
+                    SELECT id, reference, creation_datetime
+                    FROM "order"
+                    WHERE reference = ?
+                    """);
+            ps.setString(1, reference);
+            ResultSet rs = ps.executeQuery();
+
+            if (rs.next()) {
+                Order order = new Order();
+                order.setId(rs.getInt("id"));
+                order.setReference(rs.getString("reference"));
+                order.setCreationDateTime(rs.getTimestamp("creation_datetime").toInstant());
+
+                // Charger les DishOrder
+                order.setDishOrders(findDishOrdersByOrderId(order.getId()));
+
+                dbConnection.closeConnection(connection);
+                return order;
+            }
+
+            dbConnection.closeConnection(connection);
+            throw new RuntimeException("Order not found: " + reference);
+        } catch (SQLException e) {
+            dbConnection.closeConnection(connection);
+            throw new RuntimeException(e);
+        }
+    }
+
+
+    private List<DishOrder> findDishOrdersByOrderId(Integer orderId) {
+        DBConnection dbConnection = new DBConnection();
+        Connection connection = dbConnection.getConnection();
+        List<DishOrder> dishOrders = new ArrayList<>();
+
+        try {
+            PreparedStatement ps = connection.prepareStatement(
+                    """
+                    SELECT id, id_dish, quantity
+                    FROM dish_order
+                    WHERE id_order = ?
+                    """);
+            ps.setInt(1, orderId);
+            ResultSet rs = ps.executeQuery();
+
+            while (rs.next()) {
+                DishOrder dishOrder = new DishOrder();
+                dishOrder.setId(rs.getInt("id"));
+                dishOrder.setDish(findDishById(rs.getInt("id_dish")));
+                dishOrder.setQuantity(rs.getInt("quantity"));
+                dishOrders.add(dishOrder);
+            }
+
+            dbConnection.closeConnection(connection);
+            return dishOrders;
+        } catch (SQLException e) {
+            dbConnection.closeConnection(connection);
+            throw new RuntimeException(e);
+        }
+    }
+
+    //  MÉTHODES UTILITAIRES
 
     private String getSerialSequenceName(Connection conn, String tableName, String columnName)
             throws SQLException {
