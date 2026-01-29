@@ -286,20 +286,163 @@ public class DataRetriever {
         }
     }
 
+    // MÉTHODES POUR LES TABLES DE RESTAURANT
+
+    /**
+     * Trouve une table par son ID
+     */
+    public Table findTableById(Integer id) {
+        DBConnection dbConnection = new DBConnection();
+        Connection connection = dbConnection.getConnection();
+
+        try {
+            PreparedStatement ps = connection.prepareStatement(
+                    """
+                    SELECT id, number
+                    FROM restaurant_table
+                    WHERE id = ?
+                    """);
+            ps.setInt(1, id);
+            ResultSet rs = ps.executeQuery();
+
+            if (rs.next()) {
+                Table table = new Table();
+                table.setId(rs.getInt("id"));
+                table.setNumber(rs.getInt("number"));
+
+                dbConnection.closeConnection(connection);
+                return table;
+            }
+
+            dbConnection.closeConnection(connection);
+            throw new RuntimeException("Table not found: " + id);
+        } catch (SQLException e) {
+            dbConnection.closeConnection(connection);
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * Vérifie si une table est disponible à une date et heure donnée
+     * Une table est considérée comme occupée si elle a une commande active
+     * (date d'installation <= date demandée < date de départ)
+     */
+    public boolean isTableAvailable(Connection conn, Integer tableId, Instant requestedDateTime)
+            throws SQLException {
+        String sql = """
+                SELECT COUNT(*) as occupied_count
+                FROM "order"
+                WHERE id_table = ?
+                AND client_installation_datetime <= ?
+                AND (client_departure_datetime IS NULL OR client_departure_datetime > ?)
+                """;
+
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, tableId);
+            ps.setTimestamp(2, Timestamp.from(requestedDateTime));
+            ps.setTimestamp(3, Timestamp.from(requestedDateTime));
+
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getInt("occupied_count") == 0;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Récupère toutes les tables disponibles à une date et heure donnée
+     */
+    public List<Table> getAvailableTables(Connection conn, Instant requestedDateTime)
+            throws SQLException {
+        String sql = """
+                SELECT rt.id, rt.number
+                FROM restaurant_table rt
+                WHERE rt.id NOT IN (
+                    SELECT id_table
+                    FROM "order"
+                    WHERE client_installation_datetime <= ?
+                    AND (client_departure_datetime IS NULL OR client_departure_datetime > ?)
+                )
+                ORDER BY rt.number
+                """;
+
+        List<Table> availableTables = new ArrayList<>();
+
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setTimestamp(1, Timestamp.from(requestedDateTime));
+            ps.setTimestamp(2, Timestamp.from(requestedDateTime));
+
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    Table table = new Table();
+                    table.setId(rs.getInt("id"));
+                    table.setNumber(rs.getInt("number"));
+                    availableTables.add(table);
+                }
+            }
+        }
+
+        return availableTables;
+    }
+
     // MÉTHODES POUR LES COMMANDES Orders
 
-
-    public Order saveOrder(Order orderToSave) throws InsufficientStockException {
+    public Order saveOrder(Order orderToSave)
+            throws InsufficientStockException, TableNotAvailableException {
         try (Connection conn = new DBConnection().getConnection()) {
             conn.setAutoCommit(false);
 
-            // 1. Vérifier le stock pour chaque plat de la commande
+            // 1. Vérifier que la table est spécifiée
+            if (orderToSave.getTable() == null || orderToSave.getTable().getId() == null) {
+                conn.rollback();
+                throw new RuntimeException("La table doit être spécifiée pour la commande");
+            }
+
+            // 2. Vérifier que la date d'installation est spécifiée
+            if (orderToSave.getClientInstallationDateTime() == null) {
+                conn.rollback();
+                throw new RuntimeException("La date d'installation du client doit être spécifiée");
+            }
+
+            // 3. Vérifier la disponibilité de la table
+            if (!isTableAvailable(conn, orderToSave.getTable().getId(),
+                    orderToSave.getClientInstallationDateTime())) {
+
+                // Récupérer les tables disponibles pour proposer des alternatives
+                List<Table> availableTables = getAvailableTables(conn,
+                        orderToSave.getClientInstallationDateTime());
+
+                StringBuilder message = new StringBuilder();
+                message.append("La table numéro ")
+                        .append(findTableById(orderToSave.getTable().getId()).getNumber())
+                        .append(" n'est pas disponible à la date et heure demandée.");
+
+                if (availableTables.isEmpty()) {
+                    message.append(" Aucune autre table n'est actuellement disponible.");
+                } else {
+                    message.append(" Tables disponibles: ");
+                    for (int i = 0; i < availableTables.size(); i++) {
+                        if (i > 0) {
+                            message.append(", ");
+                        }
+                        message.append("Table ").append(availableTables.get(i).getNumber());
+                    }
+                }
+
+                conn.rollback();
+                throw new TableNotAvailableException(message.toString(), availableTables);
+            }
+
+            // 4. Vérifier le stock pour chaque plat de la commande
             checkStockAvailability(conn, orderToSave);
 
-            // 2. Insérer la commande
+            // 5. Insérer la commande
             String insertOrderSql = """
-                    INSERT INTO "order" (id, reference, creation_datetime)
-                    VALUES (?, ?, ?)
+                    INSERT INTO "order" (id, reference, creation_datetime, id_table, 
+                                        client_installation_datetime, client_departure_datetime)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     RETURNING id
                     """;
 
@@ -312,6 +455,14 @@ public class DataRetriever {
                 }
                 ps.setString(2, orderToSave.getReference());
                 ps.setTimestamp(3, Timestamp.from(orderToSave.getCreationDateTime()));
+                ps.setInt(4, orderToSave.getTable().getId());
+                ps.setTimestamp(5, Timestamp.from(orderToSave.getClientInstallationDateTime()));
+
+                if (orderToSave.getClientDepartureDateTime() != null) {
+                    ps.setTimestamp(6, Timestamp.from(orderToSave.getClientDepartureDateTime()));
+                } else {
+                    ps.setNull(6, Types.TIMESTAMP);
+                }
 
                 try (ResultSet rs = ps.executeQuery()) {
                     rs.next();
@@ -319,10 +470,10 @@ public class DataRetriever {
                 }
             }
 
-            // 3. Insérer les DishOrder
+            // 6. Insérer les DishOrder
             saveDishOrders(conn, orderId, orderToSave.getDishOrders());
 
-            // 4. Mettre à jour les stocks (créer des mouvements négatifs)
+            // 7. Mettre à jour les stocks (créer des mouvements négatifs)
             updateStockForOrder(conn, orderToSave);
 
             conn.commit();
@@ -331,7 +482,6 @@ public class DataRetriever {
             throw new RuntimeException(e);
         }
     }
-
 
     private void checkStockAvailability(Connection conn, Order order)
             throws SQLException, InsufficientStockException {
@@ -357,7 +507,6 @@ public class DataRetriever {
         }
     }
 
-
     private double getCurrentStock(Connection conn, Integer ingredientId) throws SQLException {
         String sql = """
                 SELECT s.quantity + COALESCE(SUM(sm.quantity), 0) as current_stock
@@ -377,7 +526,6 @@ public class DataRetriever {
         }
         return 0.0;
     }
-
 
     private void updateStockForOrder(Connection conn, Order order) throws SQLException {
         for (DishOrder dishOrder : order.getDishOrders()) {
@@ -402,7 +550,6 @@ public class DataRetriever {
         }
     }
 
-
     private void saveDishOrders(Connection conn, Integer orderId,
                                 List<DishOrder> dishOrders) throws SQLException {
         String insertSql = """
@@ -421,7 +568,6 @@ public class DataRetriever {
         }
     }
 
-
     public Order findOrderByReference(String reference) {
         DBConnection dbConnection = new DBConnection();
         Connection connection = dbConnection.getConnection();
@@ -429,7 +575,8 @@ public class DataRetriever {
         try {
             PreparedStatement ps = connection.prepareStatement(
                     """
-                    SELECT id, reference, creation_datetime
+                    SELECT id, reference, creation_datetime, id_table,
+                           client_installation_datetime, client_departure_datetime
                     FROM "order"
                     WHERE reference = ?
                     """);
@@ -441,6 +588,23 @@ public class DataRetriever {
                 order.setId(rs.getInt("id"));
                 order.setReference(rs.getString("reference"));
                 order.setCreationDateTime(rs.getTimestamp("creation_datetime").toInstant());
+
+                // Charger la table si présente
+                int tableId = rs.getInt("id_table");
+                if (!rs.wasNull()) {
+                    order.setTable(findTableById(tableId));
+                }
+
+                // Charger les dates d'installation et de départ
+                Timestamp installation = rs.getTimestamp("client_installation_datetime");
+                if (installation != null) {
+                    order.setClientInstallationDateTime(installation.toInstant());
+                }
+
+                Timestamp departure = rs.getTimestamp("client_departure_datetime");
+                if (departure != null) {
+                    order.setClientDepartureDateTime(departure.toInstant());
+                }
 
                 // Charger les DishOrder
                 order.setDishOrders(findDishOrdersByOrderId(order.getId()));
@@ -456,7 +620,6 @@ public class DataRetriever {
             throw new RuntimeException(e);
         }
     }
-
 
     private List<DishOrder> findDishOrdersByOrderId(Integer orderId) {
         DBConnection dbConnection = new DBConnection();
