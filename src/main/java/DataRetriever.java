@@ -692,10 +692,11 @@ public class DataRetriever {
     private void updateSequenceNextValue(Connection conn, String tableName,
                                          String columnName, String sequenceName)
             throws SQLException {
-        // Ajouter des guillemets doubles pour gérer les noms de tables réservés comme "order"
+
         String quotedTableName = tableName.equals("order") ? "\"order\"" : tableName;
+
         String setValSql = String.format(
-                "SELECT setval('%s', (SELECT COALESCE(MAX(%s), 0) FROM %s))",
+                "SELECT setval('%s', GREATEST((SELECT COALESCE(MAX(%s), 0) FROM %s), 1))",
                 sequenceName, columnName, quotedTableName
         );
         try (PreparedStatement ps = conn.prepareStatement(setValSql)) {

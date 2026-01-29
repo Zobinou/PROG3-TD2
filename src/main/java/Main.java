@@ -1,13 +1,64 @@
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 
 public class Main {
+
+    /**
+     * Nettoie les anciennes commandes de test avant d'exécuter les tests
+     */
+    private static void cleanupTestData() {
+        DBConnection dbConnection = new DBConnection();
+        Connection connection = dbConnection.getConnection();
+
+        try {
+            connection.setAutoCommit(false);
+
+            // Supprimer les dish_order liés aux commandes de test
+            String deleteDishOrders = """
+                DELETE FROM dish_order WHERE id_order IN (
+                    SELECT id FROM "order" WHERE reference LIKE 'ORD%'
+                )
+                """;
+            PreparedStatement ps1 = connection.prepareStatement(deleteDishOrders);
+            ps1.executeUpdate();
+
+            // Supprimer les commandes de test
+            String deleteOrders = """
+                DELETE FROM "order" WHERE reference LIKE 'ORD%'
+                """;
+            PreparedStatement ps2 = connection.prepareStatement(deleteOrders);
+            ps2.executeUpdate();
+
+            connection.commit();
+            System.out.println("✓ Anciennes données de test nettoyées");
+
+        } catch (SQLException e) {
+            try {
+                connection.rollback();
+            } catch (SQLException rollbackEx) {
+                // Ignorer
+            }
+            System.err.println("⚠ Erreur lors du nettoyage: " + e.getMessage());
+        } finally {
+            dbConnection.closeConnection(connection);
+        }
+    }
+
     public static void main(String[] args) {
         DataRetriever dr = new DataRetriever();
 
+        System.out.println("\n╔════════════════════════════════════════════════════════════════╗");
+        System.out.println("║  MINI DISH DB - SUITE DE TESTS COMPLÈTE                       ║");
+        System.out.println("╚════════════════════════════════════════════════════════════════╝\n");
+
+        // Nettoyer les anciennes données de test
+        cleanupTestData();
 
         try {
-            Thread.sleep(3000); // Pause de 3 secondes pour lire l'avertissement
+            Thread.sleep(1000);
         } catch (InterruptedException e) {
             // Ignorer
         }
@@ -234,8 +285,8 @@ public class Main {
             order1.setReference("ORD00001");
             order1.setCreationDateTime(Instant.now());
 
-            // Ajouter une table pour les tests TD Orders
-            Table table1 = dr.findTableById(1);
+            // Utiliser la table 2 (disponible)
+            Table table1 = dr.findTableById(2);
             order1.setTable(table1);
             order1.setClientInstallationDateTime(Instant.now());
             order1.setClientDepartureDateTime(Instant.now().plus(1, ChronoUnit.HOURS));
@@ -257,7 +308,7 @@ public class Main {
 
             // Vérifier stock après
             try {
-                Thread.sleep(100); // Petit délai pour garantir l'ordre des timestamps
+                Thread.sleep(100);
             } catch (InterruptedException e) {
                 // Ignorer
             }
@@ -267,10 +318,10 @@ public class Main {
             Stock tomateApres = dr.getStockValueAt(2, after);
 
             System.out.printf("\n  Stock APRÈS commande:%n");
-            System.out.printf("    Laitue: %.2f KG (-%+.2f KG)%n",
+            System.out.printf("    Laitue: %.2f KG (%.2f KG consommés)%n",
                     laitueApres.getQuantity(),
                     laitueAvant.getQuantity() - laitueApres.getQuantity());
-            System.out.printf("    Tomate: %.2f KG (-%+.2f KG)%n",
+            System.out.printf("    Tomate: %.2f KG (%.2f KG consommés)%n",
                     tomateApres.getQuantity(),
                     tomateAvant.getQuantity() - tomateApres.getQuantity());
 
@@ -288,8 +339,8 @@ public class Main {
             order2.setReference("ORD00002");
             order2.setCreationDateTime(Instant.now());
 
-            // Ajouter une table pour les tests TD Orders
-            Table table2 = dr.findTableById(2);
+            // Utiliser une table disponible
+            Table table2 = dr.findTableById(4);
             order2.setTable(table2);
             order2.setClientInstallationDateTime(Instant.now());
             order2.setClientDepartureDateTime(Instant.now().plus(1, ChronoUnit.HOURS));
@@ -328,6 +379,7 @@ public class Main {
 
             System.out.printf("\nCommande trouvée: %s%n", retrieved.getReference());
             System.out.printf("  Date: %s%n", retrieved.getCreationDateTime());
+            System.out.printf("  Table: %d%n", retrieved.getTable().getNumber());
             System.out.printf("  Plats:%n");
 
             for (DishOrder dishOrder : retrieved.getDishOrders()) {
@@ -354,8 +406,8 @@ public class Main {
             order3.setReference("ORD00003");
             order3.setCreationDateTime(Instant.now());
 
-            // Ajouter une table pour les tests TD Orders
-            Table table3 = dr.findTableById(3);
+            // Utiliser une table disponible (table 5)
+            Table table3 = dr.findTableById(5);
             order3.setTable(table3);
             order3.setClientInstallationDateTime(Instant.now());
             order3.setClientDepartureDateTime(Instant.now().plus(1, ChronoUnit.HOURS));
@@ -404,13 +456,13 @@ public class Main {
         System.out.println("─────────────────────────────────────────────────────────────────");
 
         try {
-            // Créer une commande avec une table
+            // Créer une commande avec une table disponible (table 3 selon les logs)
             Order examOrder1 = new Order();
-            examOrder1.setReference("EXAM_ORD_001");
+            examOrder1.setReference("ORD00004");
             examOrder1.setCreationDateTime(Instant.now());
 
-            // Associer la table 1
-            Table table1 = dr.findTableById(1);
+            // Associer la table 3 qui est disponible
+            Table table1 = dr.findTableById(3);
             examOrder1.setTable(table1);
 
             // Date d'installation: maintenant
@@ -454,12 +506,12 @@ public class Main {
         try {
             // Essayer de réserver la même table au même moment
             Order examOrder2 = new Order();
-            examOrder2.setReference("EXAM_ORD_002");
+            examOrder2.setReference("ORD00005");
             examOrder2.setCreationDateTime(Instant.now());
 
-            // Même table que la commande précédente
-            Table table1 = dr.findTableById(1);
-            examOrder2.setTable(table1);
+            // Même table que la commande précédente (table 3)
+            Table table3 = dr.findTableById(3);
+            examOrder2.setTable(table3);
 
             // Même période (dans l'heure qui suit)
             Instant installation2 = Instant.now().plus(30, ChronoUnit.MINUTES);
@@ -472,7 +524,7 @@ public class Main {
             examOrder2.getDishOrders().add(examDishOrder2);
 
             System.out.printf("\nTentative de réservation:%n");
-            System.out.printf("  • Table: %d (déjà occupée)%n", table1.getNumber());
+            System.out.printf("  • Table: %d (déjà occupée)%n", table3.getNumber());
             System.out.printf("  • Installation prévue: %s%n", installation2);
 
             // Ceci devrait échouer
@@ -503,13 +555,13 @@ public class Main {
         System.out.println("─────────────────────────────────────────────────────────────────");
 
         try {
-            // Réserver la table 1 mais pour plus tard (après le départ)
+            // Réserver la table 3 mais pour plus tard (après le départ)
             Order examOrder3 = new Order();
-            examOrder3.setReference("EXAM_ORD_003");
+            examOrder3.setReference("ORD00006");
             examOrder3.setCreationDateTime(Instant.now());
 
-            Table table1 = dr.findTableById(1);
-            examOrder3.setTable(table1);
+            Table table3 = dr.findTableById(3);
+            examOrder3.setTable(table3);
 
             // Installation dans 3 heures (après le départ de la première commande)
             Instant installation3 = Instant.now().plus(3, ChronoUnit.HOURS);
@@ -522,7 +574,7 @@ public class Main {
             examOrder3.getDishOrders().add(examDishOrder3);
 
             System.out.printf("\nRéservation future:%n");
-            System.out.printf("  • Table: %d%n", table1.getNumber());
+            System.out.printf("  • Table: %d%n", table3.getNumber());
             System.out.printf("  • Installation: %s (dans 3h)%n", installation3);
 
             Order savedExam3 = dr.saveOrder(examOrder3);
@@ -541,7 +593,7 @@ public class Main {
         System.out.println("─────────────────────────────────────────────────────────────────");
 
         try {
-            Order retrievedExam = dr.findOrderByReference("EXAM_ORD_001");
+            Order retrievedExam = dr.findOrderByReference("ORD00004");
 
             System.out.printf("\nCommande récupérée:%n");
             System.out.printf("  • Référence: %s%n", retrievedExam.getReference());
@@ -557,6 +609,7 @@ public class Main {
             System.err.println("\n✗ TEST EXAMEN 4 ÉCHOUÉ: " + e.getMessage());
             e.printStackTrace();
         }
+
 
     }
 }
