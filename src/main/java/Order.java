@@ -1,4 +1,3 @@
-
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -9,6 +8,9 @@ public class Order {
     private String reference;
     private Instant creationDateTime;
     private List<DishOrder> dishOrders;
+    private Table table;
+    private Instant clientInstallationDateTime;
+    private Instant clientDepartureDateTime;
 
     public Order() {
         this.dishOrders = new ArrayList<>();
@@ -51,6 +53,30 @@ public class Order {
 
     public void setDishOrders(List<DishOrder> dishOrders) {
         this.dishOrders = dishOrders;
+    }
+
+    public Table getTable() {
+        return table;
+    }
+
+    public void setTable(Table table) {
+        this.table = table;
+    }
+
+    public Instant getClientInstallationDateTime() {
+        return clientInstallationDateTime;
+    }
+
+    public void setClientInstallationDateTime(Instant clientInstallationDateTime) {
+        this.clientInstallationDateTime = clientInstallationDateTime;
+    }
+
+    public Instant getClientDepartureDateTime() {
+        return clientDepartureDateTime;
+    }
+
+    public void setClientDepartureDateTime(Instant clientDepartureDateTime) {
+        this.clientDepartureDateTime = clientDepartureDateTime;
     }
 
     /**
@@ -98,6 +124,9 @@ public class Order {
                 "id=" + id +
                 ", reference='" + reference + '\'' +
                 ", creationDateTime=" + creationDateTime +
+                ", table=" + (table != null ? "Table " + table.getNumber() : "null") +
+                ", clientInstallationDateTime=" + clientInstallationDateTime +
+                ", clientDepartureDateTime=" + clientDepartureDateTime +
                 ", dishOrders=" + (dishOrders != null ? dishOrders.size() : 0) + " plat(s)" +
                 '}';
     }

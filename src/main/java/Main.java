@@ -1,13 +1,25 @@
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 
 public class Main {
     public static void main(String[] args) {
         DataRetriever dr = new DataRetriever();
 
 
+        try {
+            Thread.sleep(3000); // Pause de 3 secondes pour lire l'avertissement
+        } catch (InterruptedException e) {
+            // Ignorer
+        }
+
+
         // ═══════════════════════════════════════════════════════════════
         // TD3: NORMALISATION ET GESTION MANYTOMANY
         // ═══════════════════════════════════════════════════════════════
+
+        System.out.println("\n\n┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓");
+        System.out.println("┃ TD3: NORMALISATION ET GESTION MANYTOMANY                       ┃");
+        System.out.println("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n");
 
 
         // Question 4: getDishCost()
@@ -222,6 +234,12 @@ public class Main {
             order1.setReference("ORD00001");
             order1.setCreationDateTime(Instant.now());
 
+            // Ajouter une table pour les tests TD Orders
+            Table table1 = dr.findTableById(1);
+            order1.setTable(table1);
+            order1.setClientInstallationDateTime(Instant.now());
+            order1.setClientDepartureDateTime(Instant.now().plus(1, ChronoUnit.HOURS));
+
             DishOrder dishOrder1 = new DishOrder();
             dishOrder1.setDish(dr.findDishById(1)); // Salade fraîche
             dishOrder1.setQuantity(2);
@@ -269,6 +287,12 @@ public class Main {
             Order order2 = new Order();
             order2.setReference("ORD00002");
             order2.setCreationDateTime(Instant.now());
+
+            // Ajouter une table pour les tests TD Orders
+            Table table2 = dr.findTableById(2);
+            order2.setTable(table2);
+            order2.setClientInstallationDateTime(Instant.now());
+            order2.setClientDepartureDateTime(Instant.now().plus(1, ChronoUnit.HOURS));
 
             DishOrder dishOrder2 = new DishOrder();
             dishOrder2.setDish(dr.findDishById(2)); // Poulet grillé
@@ -330,6 +354,12 @@ public class Main {
             order3.setReference("ORD00003");
             order3.setCreationDateTime(Instant.now());
 
+            // Ajouter une table pour les tests TD Orders
+            Table table3 = dr.findTableById(3);
+            order3.setTable(table3);
+            order3.setClientInstallationDateTime(Instant.now());
+            order3.setClientDepartureDateTime(Instant.now().plus(1, ChronoUnit.HOURS));
+
             DishOrder do1 = new DishOrder();
             do1.setDish(dr.findDishById(1)); // Salade fraîche
             do1.setQuantity(1);
@@ -361,6 +391,172 @@ public class Main {
             e.printStackTrace();
         }
 
+
+        // ═══════════════════════════════════════════════════════════════
+        // EXAMEN: GESTION DES CONTRAINTES D'ESPACE (TABLES)
+        // ═══════════════════════════════════════════════════════════════
+        System.out.println("\n\n┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓");
+        System.out.println("┃ EXAMEN: GESTION DES CONTRAINTES D'ESPACE (TABLES)             ┃");
+        System.out.println("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n");
+
+        // Test 1: Commande avec table disponible
+        System.out.println("Test 1: Commande avec table disponible");
+        System.out.println("─────────────────────────────────────────────────────────────────");
+
+        try {
+            // Créer une commande avec une table
+            Order examOrder1 = new Order();
+            examOrder1.setReference("EXAM_ORD_001");
+            examOrder1.setCreationDateTime(Instant.now());
+
+            // Associer la table 1
+            Table table1 = dr.findTableById(1);
+            examOrder1.setTable(table1);
+
+            // Date d'installation: maintenant
+            Instant installation = Instant.now();
+            examOrder1.setClientInstallationDateTime(installation);
+
+            // Date de départ: dans 2 heures
+            Instant departure = installation.plus(2, ChronoUnit.HOURS);
+            examOrder1.setClientDepartureDateTime(departure);
+
+            // Ajouter un plat
+            DishOrder examDishOrder1 = new DishOrder();
+            examDishOrder1.setDish(dr.findDishById(1)); // Salade fraîche
+            examDishOrder1.setQuantity(2);
+            examOrder1.getDishOrders().add(examDishOrder1);
+
+            System.out.printf("\nCréation de la commande:%n");
+            System.out.printf("  • Référence: %s%n", examOrder1.getReference());
+            System.out.printf("  • Table: %d%n", table1.getNumber());
+            System.out.printf("  • Installation: %s%n", installation);
+            System.out.printf("  • Départ prévu: %s%n", departure);
+            System.out.printf("  • Plat: 2 × Salade fraîche%n");
+
+            // Sauvegarder la commande
+            Order savedExam = dr.saveOrder(examOrder1);
+
+            System.out.printf("\n✓ Commande créée avec succès!%n");
+            System.out.printf("  • ID: %d%n", savedExam.getId());
+            System.out.printf("  • Montant: %.0f Ar%n", savedExam.getTotalAmountExcludingTax());
+            System.out.println("\n  ✓ TEST EXAMEN 1 RÉUSSI");
+
+        } catch (Exception e) {
+            System.err.println("\n✗ TEST EXAMEN 1 ÉCHOUÉ: " + e.getMessage());
+            e.printStackTrace();
+        }
+
+        // Test 2: Commande avec table déjà occupée (AVEC suggestion)
+        System.out.println("\n\nTest 2: Commande avec table déjà occupée (vérification suggestions)");
+        System.out.println("─────────────────────────────────────────────────────────────────");
+
+        try {
+            // Essayer de réserver la même table au même moment
+            Order examOrder2 = new Order();
+            examOrder2.setReference("EXAM_ORD_002");
+            examOrder2.setCreationDateTime(Instant.now());
+
+            // Même table que la commande précédente
+            Table table1 = dr.findTableById(1);
+            examOrder2.setTable(table1);
+
+            // Même période (dans l'heure qui suit)
+            Instant installation2 = Instant.now().plus(30, ChronoUnit.MINUTES);
+            examOrder2.setClientInstallationDateTime(installation2);
+            examOrder2.setClientDepartureDateTime(installation2.plus(2, ChronoUnit.HOURS));
+
+            DishOrder examDishOrder2 = new DishOrder();
+            examDishOrder2.setDish(dr.findDishById(2)); // Poulet grillé
+            examDishOrder2.setQuantity(1);
+            examOrder2.getDishOrders().add(examDishOrder2);
+
+            System.out.printf("\nTentative de réservation:%n");
+            System.out.printf("  • Table: %d (déjà occupée)%n", table1.getNumber());
+            System.out.printf("  • Installation prévue: %s%n", installation2);
+
+            // Ceci devrait échouer
+            dr.saveOrder(examOrder2);
+
+            System.out.println("\n✗ TEST EXAMEN 2 ÉCHOUÉ: La commande aurait dû être refusée!");
+
+        } catch (TableNotAvailableException e) {
+            System.out.printf("\n✓ Exception attendue levée:%n");
+            System.out.printf("  Message: %s%n", e.getMessage());
+
+            if (e.getAvailableTables() != null && !e.getAvailableTables().isEmpty()) {
+                System.out.printf("  Tables suggérées: %d table(s)%n", e.getAvailableTables().size());
+                for (Table t : e.getAvailableTables()) {
+                    System.out.printf("    • Table %d%n", t.getNumber());
+                }
+            }
+
+            System.out.println("\n  ✓ TEST EXAMEN 2 RÉUSSI");
+
+        } catch (Exception e) {
+            System.err.println("\n✗ TEST EXAMEN 2 ÉCHOUÉ (autre erreur): " + e.getMessage());
+            e.printStackTrace();
+        }
+
+        // Test 3: Commande avec table disponible (différente période)
+        System.out.println("\n\nTest 3: Commande sur même table mais période différente");
+        System.out.println("─────────────────────────────────────────────────────────────────");
+
+        try {
+            // Réserver la table 1 mais pour plus tard (après le départ)
+            Order examOrder3 = new Order();
+            examOrder3.setReference("EXAM_ORD_003");
+            examOrder3.setCreationDateTime(Instant.now());
+
+            Table table1 = dr.findTableById(1);
+            examOrder3.setTable(table1);
+
+            // Installation dans 3 heures (après le départ de la première commande)
+            Instant installation3 = Instant.now().plus(3, ChronoUnit.HOURS);
+            examOrder3.setClientInstallationDateTime(installation3);
+            examOrder3.setClientDepartureDateTime(installation3.plus(1, ChronoUnit.HOURS));
+
+            DishOrder examDishOrder3 = new DishOrder();
+            examDishOrder3.setDish(dr.findDishById(4)); // Gâteau au chocolat
+            examDishOrder3.setQuantity(1);
+            examOrder3.getDishOrders().add(examDishOrder3);
+
+            System.out.printf("\nRéservation future:%n");
+            System.out.printf("  • Table: %d%n", table1.getNumber());
+            System.out.printf("  • Installation: %s (dans 3h)%n", installation3);
+
+            Order savedExam3 = dr.saveOrder(examOrder3);
+
+            System.out.printf("\n✓ Commande créée avec succès!%n");
+            System.out.printf("  • ID: %d%n", savedExam3.getId());
+            System.out.println("\n  ✓ TEST EXAMEN 3 RÉUSSI");
+
+        } catch (Exception e) {
+            System.err.println("\n✗ TEST EXAMEN 3 ÉCHOUÉ: " + e.getMessage());
+            e.printStackTrace();
+        }
+
+        // Test 4: Vérification de récupération des commandes avec tables
+        System.out.println("\n\nTest 4: Récupération d'une commande avec table");
+        System.out.println("─────────────────────────────────────────────────────────────────");
+
+        try {
+            Order retrievedExam = dr.findOrderByReference("EXAM_ORD_001");
+
+            System.out.printf("\nCommande récupérée:%n");
+            System.out.printf("  • Référence: %s%n", retrievedExam.getReference());
+            System.out.printf("  • Table: %d%n", retrievedExam.getTable().getNumber());
+            System.out.printf("  • Installation: %s%n", retrievedExam.getClientInstallationDateTime());
+            System.out.printf("  • Départ: %s%n", retrievedExam.getClientDepartureDateTime());
+            System.out.printf("  • Plats: %d%n", retrievedExam.getDishOrders().size());
+            System.out.printf("  • Montant: %.0f Ar%n", retrievedExam.getTotalAmountExcludingTax());
+
+            System.out.println("\n  ✓ TEST EXAMEN 4 RÉUSSI");
+
+        } catch (Exception e) {
+            System.err.println("\n✗ TEST EXAMEN 4 ÉCHOUÉ: " + e.getMessage());
+            e.printStackTrace();
+        }
 
     }
 }
